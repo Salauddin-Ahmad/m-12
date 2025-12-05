@@ -1,59 +1,22 @@
-import express, { Request, Response } from "express";
-import { Pool } from "pg";
+import express, { NextFunction, Request, Response } from "express";
 
-import dotenv from "dotenv";
-dotenv.config();
+import config from "./config";
+import initDB, { pool } from "./config/db";
 
 const app = express();
-const port = 5000;
-
-// DB
-const pool = new Pool({
-  connectionString: process.env.PGURL,
-});
+const port = config.port;
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-const initDB = async () => {
-  try {
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS users(
-        id SERIAL PRIMARY KEY,
-        name VARCHAR(100) NOT NULL,
-        email VARCHAR(150) UNIQUE NOT NULL,
-        age INT,
-        phone VARCHAR(15),
-        address TEXT,
-        created_at TIMESTAMP DEFAULT NOW(),
-        updated_at TIMESTAMP DEFAULT NOW()
-      );
-    `);
 
-    await pool.query(`
-    CREATE TABLE IF NOT EXISTS todos(
-        id SERIAL PRIMARY KEY,
-        user_id INT REFERENCES users(id) ON DELETE CASCADE,
-        title VARCHAR(200) NOT NULL,
-        description TEXT,
-        completed BOOLEAN DEFAULT false,
-        due_date DATE,
-        created_at TIMESTAMP DEFAULT NOW(),
-        updated_at TIMESTAMP DEFAULT NOW()
-  );
-`);
 
-    console.log("Tables created");
-  } catch (error) {
-    console.error("DB Init Error:", error);
-  }
+// logger middleware
+
+const logger = (req: Request, res: Response, next: NextFunction) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}\n`);
+  next();
 };
-
-initDB().then(() => {
-  app.listen(port, () => {
-    console.log(`Server running on port ${port}`);
-  });
-});
 
 app.post("/users", async (req: Request, res: Response) => {
   const { name, email } = req.body;
@@ -77,7 +40,7 @@ app.post("/users", async (req: Request, res: Response) => {
   }
 });
 
-app.get("/users", async (req: Request, res: Response) => {
+app.get("/users", logger, async (req: Request, res: Response) => {
   try {
     const result = await pool.query(`SELECT * from users`);
     res.status(200).json({
@@ -107,12 +70,11 @@ app.get("/users/:id", async (req: Request, res: Response) => {
         success: false,
         message: "users not found",
       });
-    }
-    else {
-        res.status(200).json({
+    } else {
+      res.status(200).json({
         success: true,
         message: "user fetched successfully",
-        data: result.rows[0]
+        data: result.rows[0],
       });
     }
   } catch (error: any) {
@@ -124,28 +86,28 @@ app.get("/users/:id", async (req: Request, res: Response) => {
   }
 });
 
-
 app.put("/users/:id", async (req: Request, res: Response) => {
   try {
     // console.log(req.params.id);
 
-    const {name, email} = req.body;
+    const { name, email } = req.body;
 
-    const result = await pool.query(`UPDATE users SET name=$1, email=$2 WHERE id=$3 RETURNING *`, [name, email, req.params.id]);
+    const result = await pool.query(
+      `UPDATE users SET name=$1, email=$2 WHERE id=$3 RETURNING *`,
+      [name, email, req.params.id]
+    );
     console.log(result);
-  
 
     if (result.rows.length === 0) {
       res.status(404).json({
         success: false,
         message: "users not found",
       });
-    }
-    else {
-        res.status(200).json({
+    } else {
+      res.status(200).json({
         success: true,
         message: "user updated successfully",
-        data: result.rows[0]
+        data: result.rows[0],
       });
     }
   } catch (error: any) {
@@ -156,7 +118,6 @@ app.put("/users/:id", async (req: Request, res: Response) => {
     });
   }
 });
-
 
 app.delete("/users/:id", async (req: Request, res: Response) => {
   try {
@@ -172,12 +133,11 @@ app.delete("/users/:id", async (req: Request, res: Response) => {
         success: false,
         message: "users not found",
       });
-    }
-    else {
-        res.status(200).json({
+    } else {
+      res.status(200).json({
         success: true,
         message: "user deleted successfully",
-        data: result.rows
+        data: result.rows,
       });
     }
   } catch (error: any) {
@@ -187,4 +147,46 @@ app.delete("/users/:id", async (req: Request, res: Response) => {
       details: error,
     });
   }
+});
+
+// todos crud
+
+app.post("/todos", async (req: Request, res: Response) => {
+  try {
+    let { user_id, title } = req.body;
+    const userId = Number(user_id);
+
+    const result = await pool.query(
+      `INSERT INTO todos(user_id, title) 
+      VALUES($1, $2) returning *`,
+      [userId, title]
+    );
+
+    console.log(result);
+
+    res.status(200).json({
+      success: true,
+      message: "data inserted",
+      data: result.rows[0],
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+});
+
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    message: "rote not found",
+    path: req.path,
+  });
+});
+
+initDB().then(() => {
+  app.listen(port, () => {
+    console.log(`Server running on port ${port}`);
+  });
 });
